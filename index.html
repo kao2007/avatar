@@ -219,13 +219,16 @@ footer{
 
   <section>
     <div class="sec-head"><h2>背景を選ぶ</h2><span class="tag">CAMPUS</span></div>
-    <div class="grid" id="bgGrid"></div>
+    <div class="err" id="diag"></div>
+    <div class="grid" id="bgGrid" style="margin-top:12px"></div>
   </section>
 
   <section>
     <div class="sec-head"><h2>仕上げる</h2><span class="tag">LAYOUT / TONE</span></div>
     <div class="chips" id="layoutChips" style="margin-bottom:10px"></div>
+    <div class="chips" id="styleChips" style="margin-bottom:10px"></div>
     <div class="chips" id="toneChips"></div>
+    <p class="note" id="aistat" style="margin-top:14px">「AI切り抜き合成」は初回のみモデル（約2MB）をダウンロードします。以降はオフラインでも動きます。</p>
     <div class="field">
       <label for="caption">写真に入れる一言</label>
       <input id="caption" maxlength="24" value="#敬愛大生になる日" placeholder="例）#敬愛大生になる日">
@@ -242,19 +245,50 @@ footer{
 const OUT_W = 1080, OUT_H = 1350;
 
 const BACKGROUNDS = [
-  {f:"images/campus3.jpg", n:"新校舎 外観"},
-  {f:"images/campus1.jpg", n:"アクティブラーニング教室"},
-  {f:"images/campus2.jpg", n:"グループワークルーム"},
-  {f:"images/campus5.jpg", n:"ラーニングコモンズ"},
-  {f:"images/campus7.jpg", n:"学生ラウンジ"},
-  {f:"images/campus8.jpg", n:"カフェテリア"},
-  {f:"images/campus6.jpg", n:"セミナールーム"},
-  {f:"images/campus4.jpg", n:"キャンパス全景"}
+  {n:"新校舎 外観",             k:["campus3","shikyoikuto3","shinkoikuto3"]},
+  {n:"アクティブラーニング教室", k:["campus1","shinkoikuto10"]},
+  {n:"グループワークルーム",     k:["campus2","shinkoikuto9"]},
+  {n:"ラーニングコモンズ",       k:["campus5","shinkoikuto5"]},
+  {n:"学生ラウンジ",             k:["campus7","shinkoikuto6"]},
+  {n:"カフェテリア",             k:["campus8","shikyoikuto8","shinkoikuto8"]},
+  {n:"セミナールーム",           k:["campus6","shinkoikuto7"]},
+  {n:"キャンパス全景",           k:["campus4","soshikizu202404c"]}
 ];
+
+/* 置き場所・拡張子の揺れを吸収して最初に読めたものを使う */
+const DIRS = ["images/","img/","",  "photos/"];
+const EXTS = [".jpg",".JPG",".jpeg",".png",".webp"];
+function candidates(b){
+  const out=[];
+  for(const d of DIRS) for(const k of b.k) for(const e of EXTS) out.push(d+k+e);
+  return out;
+}
+function tryLoad(src){
+  return new Promise(res=>{
+    const i=new Image();
+    i.onload=()=>res(i); i.onerror=()=>res(null);
+    i.src=src;
+  });
+}
+async function resolveBg(b){
+  if(b._img!==undefined) return b._img;
+  for(const src of candidates(b)){
+    const img = await tryLoad(src);
+    if(img){ b.f=src; b._img=img; return img; }
+  }
+  b._img=null; return null;
+}
 const LAYOUTS = [
+  {id:"cut",   n:"AI切り抜き合成"},
   {id:"round", n:"丸窓"},
   {id:"split", n:"上下2分割"},
   {id:"full",  n:"全面＋フレーム"}
+];
+const STYLES = [
+  {id:"none",   n:"そのまま"},
+  {id:"illust", n:"イラスト風"},
+  {id:"anime",  n:"アニメ風"},
+  {id:"ink",    n:"版画風"}
 ];
 const TONES = [
   {id:"natural", n:"ナチュラル", css:"saturate(1.03) contrast(1.02)"},
@@ -262,7 +296,7 @@ const TONES = [
   {id:"film",    n:"フィルム",   css:"contrast(1.12) saturate(.86) sepia(.16)"}
 ];
 
-let state = {bg:0, layout:"round", tone:"natural", facing:"user", stream:null, shot:null};
+let state = {bg:0, layout:"cut", style:"illust", tone:"natural", facing:"user", stream:null, shot:null};
 
 const $ = id => document.getElementById(id);
 const video=$("video"), preview=$("preview"), idle=$("idle"),
@@ -270,9 +304,26 @@ const video=$("video"), preview=$("preview"), idle=$("idle"),
 
 /* ---- build pickers ---- */
 $("bgGrid").innerHTML = BACKGROUNDS.map((b,i)=>
-  `<button class="thumb" data-i="${i}" aria-pressed="${i===0}"><img src="${b.f}" alt="${b.n}" loading="lazy"><span>${b.n}</span></button>`).join("");
+  `<button class="thumb" data-i="${i}" aria-pressed="${i===0}"><img id="th${i}" alt="${b.n}"><span>${b.n}</span></button>`).join("");
+
+(async ()=>{
+  const missing=[];
+  for(let i=0;i<BACKGROUNDS.length;i++){
+    const img = await resolveBg(BACKGROUNDS[i]);
+    if(img) $("th"+i).src = BACKGROUNDS[i].f;
+    else { missing.push(BACKGROUNDS[i].k[0]+".jpg"); $("th"+i).closest(".thumb").style.opacity=".35"; }
+  }
+  if(missing.length){
+    $("diag").innerHTML = "背景画像が読み込めません（"+missing.length+"件）：<code>"+missing.join(", ")
+      +"</code><br>リポジトリの <code>images/</code> フォルダにこの名前で置かれているか確認してください。"
+      +"GitHub の Web UI では <b>フォルダをドラッグ&ドロップ</b>しないと <code>images/</code> は作られません。";
+    $("diag").classList.add("on");
+  }
+})();
 $("layoutChips").innerHTML = LAYOUTS.map(l=>
-  `<button class="chip" data-l="${l.id}" aria-pressed="${l.id==='round'}">${l.n}</button>`).join("");
+  `<button class="chip" data-l="${l.id}" aria-pressed="${l.id==='cut'}">${l.n}</button>`).join("");
+$("styleChips").innerHTML = STYLES.map(s=>
+  `<button class="chip" data-s="${s.id}" aria-pressed="${s.id==='illust'}">${s.n}</button>`).join("");
 $("toneChips").innerHTML = TONES.map(t=>
   `<button class="chip" data-t="${t.id}" aria-pressed="${t.id==='natural'}">${t.n}</button>`).join("");
 shutter.innerHTML = Array.from({length:9},(_,i)=>`<i style="top:${i*11.2}%"></i>`).join("");
@@ -282,10 +333,10 @@ function bind(sel, attr, key){
     document.querySelectorAll(sel).forEach(x=>x.setAttribute("aria-pressed","false"));
     b.setAttribute("aria-pressed","true");
     state[key] = attr==="i" ? +b.dataset.i : b.dataset[attr];
-    if(state.shot) compose();
+    if(state.shot){ if(attr!=="t") cache={key:null,cv:null}; compose(); }
   }));
 }
-bind(".thumb","i","bg"); bind("[data-l]","l","layout"); bind("[data-t]","t","tone");
+bind(".thumb","i","bg"); bind("[data-l]","l","layout"); bind("[data-t]","t","tone"); bind("[data-s]","s","style");
 $("caption").addEventListener("input",()=>{ if(state.shot) compose(); });
 
 /* ---- camera ---- */
@@ -308,7 +359,7 @@ async function startCamera(){
     $("btnShoot").disabled = false; $("btnFlip").disabled = false;
     $("btnStart").textContent = "カメラを再起動";
   }catch(e){
-    showErr("カメラを開けませんでした（"+e.name+"）。ブラウザ設定でカメラを許可するか、下の「ファイル選択」から撮影してください。");
+    showErr(e.name==="NotAllowedError" ? "カメラの使用が拒否されています。アドレスバー左のカメラ/鍵アイコン →「カメラ」を『許可』に変えて再読み込みしてください。" : "カメラを開けませんでした（"+e.name+"）。下の「ファイルを選択」からでも撮影できます。");
   }
 }
 
@@ -336,7 +387,7 @@ function grabFrame(){
   const x = c.getContext("2d");
   if(state.facing==="user"){ x.translate(c.width,0); x.scale(-1,1); }
   x.drawImage(video,0,0);
-  state.shot = c;
+  state.shot = c; cache={key:null,cv:null};
   compose();
 }
 
@@ -347,21 +398,136 @@ $("filePick").addEventListener("change", e=>{
     const c = document.createElement("canvas");
     c.width = img.naturalWidth; c.height = img.naturalHeight;
     c.getContext("2d").drawImage(img,0,0);
-    state.shot = c; compose(); err.classList.remove("on");
+    state.shot = c; cache={key:null,cv:null}; compose(); err.classList.remove("on");
   };
   img.src = URL.createObjectURL(f);
 });
 
 /* ---- compose ---- */
-const bgCache = {};
-function loadBg(src){
-  if(bgCache[src]) return Promise.resolve(bgCache[src]);
-  return new Promise(res=>{
-    const i = new Image();
-    i.onload = ()=>{ bgCache[src]=i; res(i); };
-    i.onerror = ()=>res(null);
-    i.src = src;
+/* ===== ブラウザ内AI：人物セグメンテーション ===== */
+let segmenter = null, segLoading = null;
+function initSeg(){
+  if(segmenter) return Promise.resolve(segmenter);
+  if(segLoading) return segLoading;
+  $("aistat").textContent = "AIモデルを読み込み中…（初回のみ）";
+  segLoading = (async ()=>{
+    const V = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14";
+    const {ImageSegmenter, FilesetResolver} = await import(V);
+    const vision = await FilesetResolver.forVisionTasks(V + "/wasm");
+    segmenter = await ImageSegmenter.createFromOptions(vision, {
+      baseOptions:{
+        modelAssetPath:"https://storage.googleapis.com/mediapipe-models/image_segmenter/selfie_segmenter/float16/1/selfie_segmenter.tflite",
+        delegate:"GPU"
+      },
+      runningMode:"IMAGE", outputCategoryMask:true, outputConfidenceMasks:false
+    });
+    $("aistat").textContent = "AIモデル読み込み完了。人物だけを切り抜いて背景に合成します。";
+    return segmenter;
+  })().catch(e=>{
+    segLoading = null;
+    $("aistat").textContent = "AIモデルを読み込めませんでした（通信環境をご確認ください）。他のレイアウトはそのまま使えます。";
+    throw e;
   });
+  return segLoading;
+}
+
+async function cutout(src){
+  const seg = await initSeg();
+  const res = seg.segment(src);
+  const mask = res.categoryMask;
+  const mw = mask.width, mh = mask.height;
+  const raw = mask.getAsUint8Array();
+
+  let on = 0;
+  for(let i=0;i<raw.length;i++) if(raw[i]!==0) on++;
+  const invert = on > raw.length*0.82;   // 人物が画面の大半＝ラベル反転とみなす
+
+  const mc = document.createElement("canvas"); mc.width=mw; mc.height=mh;
+  const mx = mc.getContext("2d");
+  const id = mx.createImageData(mw,mh);
+  for(let i=0;i<raw.length;i++){
+    let p = raw[i]!==0; if(invert) p = !p;
+    const j = i*4;
+    id.data[j]=id.data[j+1]=id.data[j+2]=255;
+    id.data[j+3] = p ? 255 : 0;
+  }
+  mx.putImageData(id,0,0);
+  mask.close(); if(res.close) res.close();
+
+  const out = document.createElement("canvas");
+  out.width = src.width; out.height = src.height;
+  const ox = out.getContext("2d");
+  ox.filter = "blur(" + Math.max(1.2, src.width/320) + "px)";   // 輪郭のなじませ
+  ox.drawImage(mc, 0, 0, src.width, src.height);
+  ox.filter = "none";
+  ox.globalCompositeOperation = "source-in";
+  ox.drawImage(src, 0, 0);
+  return out;
+}
+
+/* ===== イラスト／アニメ／版画 変換（色の量子化＋輪郭線） ===== */
+function stylize(cv, mode){
+  if(mode === "none") return cv;
+  const w = cv.width, h = cv.height;
+  const o = document.createElement("canvas"); o.width=w; o.height=h;
+  const x = o.getContext("2d", {willReadFrequently:true});
+  const soften = Math.max(1, w/560);
+  x.filter = mode==="ink"
+    ? `saturate(.12) contrast(1.35) blur(${soften}px)`
+    : `saturate(${mode==="anime"?1.45:1.22}) contrast(1.06) blur(${soften}px)`;
+  x.drawImage(cv,0,0);
+  x.filter = "none";
+
+  const src = x.getImageData(0,0,w,h), d = src.data;
+  const lum = new Float32Array(w*h);
+  for(let i=0,p=0;i<d.length;i+=4,p++) lum[p] = .299*d[i] + .587*d[i+1] + .114*d[i+2];
+
+  const dst = x.createImageData(w,h), q = dst.data;
+  const levels = mode==="ink" ? 3 : mode==="anime" ? 5 : 8;
+  const step = 255/(levels-1);
+  const thr  = mode==="ink" ? 20 : mode==="anime" ? 26 : 34;
+  const dark = mode==="ink" ? .04 : mode==="anime" ? .18 : .32;
+
+  for(let y=0;y<h;y++){
+    for(let xx=0;xx<w;xx++){
+      const p = y*w+xx, i = p*4;
+      let g = 0;
+      if(xx>0 && xx<w-1 && y>0 && y<h-1){
+        const gx = -lum[p-w-1]-2*lum[p-1]-lum[p+w-1] + lum[p-w+1]+2*lum[p+1]+lum[p+w+1];
+        const gy = -lum[p-w-1]-2*lum[p-w]-lum[p-w+1] + lum[p+w-1]+2*lum[p+w]+lum[p+w+1];
+        g = Math.sqrt(gx*gx+gy*gy)/4;
+      }
+      const k = g > thr ? dark : 1;
+      for(let c=0;c<3;c++){
+        const v = Math.round(d[i+c]/step)*step * k;
+        q[i+c] = v<0?0:v>255?255:v;
+      }
+      q[i+3] = d[i+3];
+    }
+  }
+  x.putImageData(dst,0,0);
+  return o;
+}
+
+/* 変換結果のキャッシュ（キャプション入力のたびに再計算しないため） */
+let cache = {key:null, cv:null};
+async function processed(){
+  const key = state.style + "|" + (state.layout==="cut" ? "cut" : "flat");
+  if(cache.key === key && cache.cv) return cache.cv;
+  let cv = state.shot;
+  if(state.layout === "cut"){
+    try{ cv = await cutout(cv); }
+    catch(e){ return null; }
+  }
+  cv = stylize(cv, state.style);
+  cache = {key, cv};
+  return cv;
+}
+
+function fallbackBg(g){
+  const grd = g.createLinearGradient(0,0,0,OUT_H);
+  grd.addColorStop(0,"#0E1621"); grd.addColorStop(.55,"#28455F"); grd.addColorStop(1,"#7FB2D9");
+  g.fillStyle = grd; g.fillRect(0,0,OUT_W,OUT_H);
 }
 
 function cover(ctx, img, dx, dy, dw, dh){
@@ -375,27 +541,46 @@ async function compose(){
   if(!state.shot) return;
   preview.width = OUT_W; preview.height = OUT_H;
   const g = preview.getContext("2d");
-  const bg = await loadBg(BACKGROUNDS[state.bg].f);
+  const bg = await resolveBg(BACKGROUNDS[state.bg]);
   const tone = TONES.find(t=>t.id===state.tone).css;
 
   g.clearRect(0,0,OUT_W,OUT_H);
   g.fillStyle = "#0E1621"; g.fillRect(0,0,OUT_W,OUT_H);
 
-  if(state.layout==="full"){
-    g.filter = tone; cover(g, state.shot, 0,0,OUT_W,OUT_H); g.filter="none";
+  const shot = await processed();
+  if(!shot){                                   // AI失敗時は丸窓に自動フォールバック
+    if(bg){ g.filter="brightness(.94)"; cover(g,bg,0,0,OUT_W,OUT_H); g.filter="none"; } else fallbackBg(g);
+    drawLouvers(g); drawPlate(g);
+    preview.hidden=false; video.hidden=true; idle.hidden=true;
+    $("btnRetake").hidden=false; $("saveBar").hidden=false; return;
+  }
+
+  if(state.layout==="cut"){
+    if(bg){ g.filter="brightness(.97) blur(3px)"; cover(g,bg,0,0,OUT_W,OUT_H); g.filter="none"; }
+    else fallbackBg(g);
+    const s = Math.min(OUT_W*1.15/shot.width, OUT_H*1.02/shot.height);
+    const pw = shot.width*s, ph = shot.height*s;
+    const px = (OUT_W-pw)/2, py = OUT_H - ph - 40;
+    g.save();
+    g.shadowColor = "rgba(14,22,33,.42)"; g.shadowBlur = 46; g.shadowOffsetY = 16;
+    g.filter = tone;
+    g.drawImage(shot, px, py, pw, ph);
+    g.restore();
+  }else if(state.layout==="full"){
+    g.filter = tone; cover(g, shot, 0,0,OUT_W,OUT_H); g.filter="none";
     g.fillStyle = "rgba(14,22,33,.30)"; g.fillRect(0,OUT_H-330,OUT_W,330);
   }else if(state.layout==="split"){
-    g.filter = tone; cover(g, state.shot, 0,0,OUT_W,830); g.filter="none";
-    if(bg) cover(g, bg, 0,830,OUT_W,OUT_H-830);
+    g.filter = tone; cover(g, shot, 0,0,OUT_W,830); g.filter="none";
+    if(bg) cover(g, bg, 0,830,OUT_W,OUT_H-830); else { g.save(); g.beginPath(); g.rect(0,830,OUT_W,OUT_H-830); g.clip(); fallbackBg(g); g.restore(); }
     g.fillStyle="rgba(14,22,33,.42)"; g.fillRect(0,OUT_H-250,OUT_W,250);
     g.fillStyle="#B21E28"; g.fillRect(0,824,OUT_W,6);
   }else{ // round
-    if(bg){ g.filter="brightness(.94)"; cover(g,bg,0,0,OUT_W,OUT_H); g.filter="none"; }
+    if(bg){ g.filter="brightness(.94)"; cover(g,bg,0,0,OUT_W,OUT_H); g.filter="none"; } else fallbackBg(g);
     g.fillStyle="rgba(14,22,33,.34)"; g.fillRect(0,0,OUT_W,OUT_H);
     const cx=540, cy=580, r=356;
     g.save();
     g.beginPath(); g.arc(cx,cy,r,0,Math.PI*2); g.closePath(); g.clip();
-    g.filter = tone; cover(g, state.shot, cx-r, cy-r, r*2, r*2); g.filter="none";
+    g.filter = tone; cover(g, shot, cx-r, cy-r, r*2, r*2); g.filter="none";
     g.restore();
     g.strokeStyle="#fff"; g.lineWidth=14;
     g.beginPath(); g.arc(cx,cy,r+7,0,Math.PI*2); g.stroke();
@@ -403,7 +588,7 @@ async function compose(){
     g.beginPath(); g.arc(cx,cy,r+22,0,Math.PI*2); g.stroke();
   }
 
-  drawLouvers(g);
+  if(state.layout!=="cut") drawLouvers(g);
   drawPlate(g);
 
   preview.hidden = false; video.hidden = true; idle.hidden = true;
